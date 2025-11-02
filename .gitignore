@@ -1,6 +1,5 @@
-# Ignore big files
-__pycache__/
 venv/
+__pycache__
 *.pth
 users.db
 uploads/
