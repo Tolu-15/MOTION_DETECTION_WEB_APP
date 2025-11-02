@@ -1,0 +1,7 @@
+# Ignore big files
+__pycache__/
+venv/
+*.pth
+users.db
+uploads/
+data/
