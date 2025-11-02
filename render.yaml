@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: emotion-detection-babalola  # Change to creative name if wanted
+    env: python
+    branch: main
+    buildCommand: pip install -r requirements.txt && python model.py  # Installs + trains model
+    startCommand: gunicorn app:app
+    plan: free
