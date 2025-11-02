@@ -1,5 +1,3 @@
-# app.py - Emotion Detection Web App (uses your trained model)
-
 from flask import Flask, render_template, request, jsonify
 import torch
 import torch.nn as nn
@@ -10,63 +8,45 @@ import base64
 import os
 import sqlite3
 
-# -------------------------------------------------
-# Flask setup
-# -------------------------------------------------
 app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# -------------------------------------------------
-# 1. MODEL DEFINITION (must be EXACTLY the same as in model.py)
-# -------------------------------------------------
-
-
-class SimpleEmotionModel(nn.Module):
+# === LIGHTWEIGHT MODEL ===
+class TinyEmotionCNN(nn.Module):
     def __init__(self):
-        super(SimpleEmotionModel, self).__init__()
-        self.conv1 = nn.Conv2d(1, 32, 3, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
-        self.conv3 = nn.Conv2d(64, 128, 3, padding=1)
+        super().__init__()
+        self.conv1 = nn.Conv2d(1, 16, 3, padding=1)
+        self.conv2 = nn.Conv2d(16, 32, 3, padding=1)
         self.pool = nn.MaxPool2d(2, 2)
-        self.fc1 = nn.Linear(128 * 6 * 6, 512)
-        self.fc2 = nn.Linear(512, 7)
+        self.fc1 = nn.Linear(32 * 12 * 12, 64)
+        self.fc2 = nn.Linear(64, 7)
         self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(0.5)
-
-        self.batch_norm1 = nn.BatchNorm2d(32)
-        self.batch_norm2 = nn.BatchNorm2d(64)
-        self.batch_norm3 = nn.BatchNorm2d(128)
+        self.dropout = nn.Dropout(0.3)
 
     def forward(self, x):
-        x = self.pool(self.relu(self.batch_norm1(self.conv1(x))))
-        x = self.pool(self.relu(self.batch_norm2(self.conv2(x))))
-        x = self.pool(self.relu(self.batch_norm3(self.conv3(x))))
-        x = x.view(-1, 128 * 6 * 6)
+        x = self.pool(self.relu(self.conv1(x)))
+        x = self.pool(self.relu(self.conv2(x)))
+        x = x.view(-1, 32 * 12 * 12)
         x = self.dropout(self.relu(self.fc1(x)))
         x = self.fc2(x)
         return x
 
+# === LOAD MODEL ONCE ===
+print("Loading model...")
+device = torch.device("cpu")
+model = TinyEmotionCNN().to(device)
 
-# -------------------------------------------------
-# 2. LOAD THE TRAINED MODEL
-# -------------------------------------------------
-device = torch.device('cpu')
-model = SimpleEmotionModel().to(device)
+# Load your trained weights (emotion_model.pth)
+try:
+    model.load_state_dict(torch.load('emotion_model.pth', map_location=device))
+    print("Model loaded!")
+except:
+    print("No model found — using random weights")
 
-# NOTE: if you ever switch to the pre-trained 85% model, comment the line above
-# and use the block from the previous answer.
-
-model_path = 'emotion_model.pth'
-if not os.path.exists(model_path):
-    raise FileNotFoundError(
-        f"Model file '{model_path}' not found. Run `python model.py` first.")
-model.load_state_dict(torch.load(model_path, map_location=device))
 model.eval()
 
-# -------------------------------------------------
-# 3. PRE-PROCESSING (same as training)
-# -------------------------------------------------
+# === TRANSFORM ===
 transform = transforms.Compose([
     transforms.Grayscale(num_output_channels=1),
     transforms.Resize((48, 48)),
@@ -76,97 +56,59 @@ transform = transforms.Compose([
 
 emotions = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral']
 
-# -------------------------------------------------
-# 4. DATABASE SETUP
-# -------------------------------------------------
-conn = sqlite3.connect('users.db')
+# === DB ===
+conn = sqlite3.connect('users.db', check_same_thread=False)
 c = conn.cursor()
-c.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY,
-        name TEXT,
-        image_path TEXT,
-        emotion TEXT
-    )
-''')
+c.execute('''CREATE TABLE IF NOT EXISTS users 
+             (name TEXT, image_path TEXT, emotion TEXT)''')
 conn.commit()
-conn.close()
 
-# -------------------------------------------------
-# 5. PREDICTION HELPERS
-# -------------------------------------------------
-
-
-def predict_image(img: Image.Image) -> str:
-    img_tensor = transform(img).unsqueeze(0).to(device)
+def predict_image(img):
+    img = transform(img).unsqueeze(0).to(device)
     with torch.no_grad():
-        output = model(img_tensor)
+        output = model(img)
         idx = output.argmax().item()
     return emotions[idx]
 
-# -------------------------------------------------
-# 6. ROUTES
-# -------------------------------------------------
-
-
 @app.route('/')
-def home():
+def index():
     return render_template('index.html')
-
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    name = request.form.get('name', '').strip()
+    name = request.form['name'].strip()
     if not name:
-        return jsonify({'error': 'Please enter your name'})
+        return jsonify({'error': 'Enter name'})
 
     image_path = None
-    img = None
 
-    # ---- Uploaded file -------------------------------------------------
+    # === UPLOAD ===
     if 'file' in request.files and request.files['file'].filename:
         file = request.files['file']
         img = Image.open(file.stream).convert('RGB')
-        image_path = os.path.join(UPLOAD_FOLDER, f"{name}_uploaded.jpg")
+        image_path = os.path.join(UPLOAD_FOLDER, f"{name}_up.jpg")
         img.save(image_path, 'JPEG')
-        print(f"[DEBUG] Saved uploaded image: {image_path}")
 
-    # ---- Camera capture (base64) ---------------------------------------
+    # === CAMERA ===
     elif 'image' in request.form:
-        b64 = request.form['image'].split(',', 1)[1]
-        # fix padding
-        b64 += '=' * ((4 - len(b64) % 4) % 4)
-        try:
-            img_bytes = base64.b64decode(b64)
-            img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
-            image_path = os.path.join(UPLOAD_FOLDER, f"{name}_camera.jpg")
-            img.save(image_path, 'JPEG')
-            print(f"[DEBUG] Saved camera image: {image_path}")
-        except Exception as e:
-            return jsonify({'error': f'Invalid image data: {e}'})
+        data = request.form['image'].split(',')[1]
+        data += '=' * (-len(data) % 4)
+        img_bytes = base64.b64decode(data)
+        img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
+        image_path = os.path.join(UPLOAD_FOLDER, f"{name}_cam.jpg")
+        img.save(image_path, 'JPEG')
 
     else:
-        return jsonify({'error': 'No image provided'})
+        return jsonify({'error': 'No image'})
 
-    # ---- Predict -------------------------------------------------------
+    # === PREDICT ===
     emotion = predict_image(img)
 
-    # ---- Save to DB ----------------------------------------------------
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO users (name, image_path, emotion) VALUES (?, ?, ?)",
-        (name, image_path, emotion)
-    )
+    # === SAVE TO DB ===
+    c.execute("INSERT INTO users VALUES (?, ?, ?)", (name, image_path, emotion))
     conn.commit()
-    conn.close()
 
     return jsonify({'emotion': emotion})
 
-
-# -------------------------------------------------
-# 7. RUN
-# -------------------------------------------------
 if __name__ == '__main__':
-    print("Go to http://127.0.0.1:5000 in your browser")
-    app.run(debug=True)
+    app.run()
