@@ -22,46 +22,34 @@
 
         <hr>
 
-        <!-- Live Camera -->
-        <h3>Or Use Camera</h3>
-        <video id="video" width="320" height="240" autoplay></video>
-        <br>
-        <button type="button" onclick="takePhoto()">Take Photo & Detect</button>
+        <!-- Upload -->
+<input type="file" id="fileInput" accept="image/*">
+<button type="button" onclick="uploadImage()">Upload & Detect</button>
 
-        <canvas id="canvas" width="320" height="240" style="display:none;"></canvas>
+<!-- Camera -->
+<video id="video" width="320" height="240" autoplay></video>
+<canvas id="canvas" width="320" height="240" style="display:none;"></canvas>
+<button type="button" onclick="takePhoto()">Take Photo & Detect</button>
 
-        <h2 id="result" style="min-height: 50px;"></h2>
+<h2 id="result" style="min-height:50px;"></h2>
     </div>
 
   <script>
-    // Start camera
+    // Camera
     const video = document.getElementById('video');
     navigator.mediaDevices.getUserMedia({ video: true })
         .then(stream => video.srcObject = stream)
         .catch(err => alert("Camera error: " + err.message));
 
-    // Take photo from camera
-    function takePhoto() {
-        const canvas = document.getElementById('canvas');
-        const context = canvas.getContext('2d');
-        context.drawImage(video, 0, 0, 320, 240);
-        const imageData = canvas.toDataURL('image/jpeg');  // ← Force JPEG
-
-        const name = document.getElementById('name').value.trim();
-        if (!name) return alert("Please enter your name!");
-
-        sendImage(imageData, name, 'camera');
-    }
-
-    // Upload file
+    // Upload
     function uploadImage() {
-        const fileInput = document.getElementById('fileInput');
+        const file = document.getElementById('fileInput').files[0];
         const name = document.getElementById('name').value.trim();
-        if (!name) return alert("Please enter your name!");
-        if (!fileInput.files[0]) return alert("Choose an image!");
+        if (!name) return alert("Enter your name!");
+        if (!file) return alert("Choose an image!");
 
         const formData = new FormData();
-        formData.append('file', fileInput.files[0]);
+        formData.append('file', file);
         formData.append('name', name);
 
         fetch('/predict', {
@@ -69,12 +57,20 @@
             body: formData
         })
         .then(res => res.json())
-        .then(data => showResult(data, name))
-        .catch(err => alert("Error: " + err));
+        .then(data => showResult(data))
+        .catch(err => alert("Network error: " + err));
     }
 
-    // Send camera image
-    function sendImage(imageData, name, type) {
+    // Camera
+    function takePhoto() {
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, 320, 240);
+        const imageData = canvas.toDataURL('image/jpeg');
+
+        const name = document.getElementById('name').value.trim();
+        if (!name) return alert("Enter your name!");
+
         const formData = new FormData();
         formData.append('image', imageData);
         formData.append('name', name);
@@ -84,19 +80,17 @@
             body: formData
         })
         .then(res => res.json())
-        .then(data => showResult(data, name))
-        .catch(err => alert("Error: " + err));
+        .then(data => showResult(data))
+        .catch(err => alert("Network error: " + err));
     }
 
-    // Show result on page
-    function showResult(data, name) {
-        const resultDiv = document.getElementById('result');
+    // Show result
+    function showResult(data) {
+        const result = document.getElementById('result');
         if (data.emotion) {
-            resultDiv.innerHTML = `<strong>${name}, you look: <span style="color: #ff6b6b;">${data.emotion}</span>!</strong>`;
-            resultDiv.style.color = 'white';
-            resultDiv.style.fontSize = '1.5em';
+            result.innerHTML = `<strong>${data.name || 'User'}, you look: <span style="color: #ff6b6b;">${data.emotion}</span>!</strong>`;
         } else {
-            resultDiv.innerHTML = `<span style="color: red;">Error: ${data.error}</span>`;
+            result.innerHTML = `<span style="color: red;">Error: ${data.error}</span>`;
         }
     }
 </script>
